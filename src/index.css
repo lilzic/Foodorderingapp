@@ -911,6 +911,10 @@
     border-color: var(--color-orange-200);
   }
 
+  .border-orange-600 {
+    border-color: var(--color-orange-600);
+  }
+
   .border-red-600 {
     border-color: var(--color-red-600);
   }
@@ -1439,6 +1443,12 @@
   @media (hover: hover) {
     .hover\:bg-green-600:hover {
       background-color: var(--color-green-600);
+    }
+  }
+
+  @media (hover: hover) {
+    .hover\:bg-orange-50:hover {
+      background-color: var(--color-orange-50);
     }
   }
 
@@ -2014,6 +2024,18 @@
   @media (hover: hover) {
     .dark\:hover\:bg-orange-700:is(.dark *):hover {
       background-color: var(--color-orange-700);
+    }
+  }
+
+  @media (hover: hover) {
+    .dark\:hover\:bg-orange-900\/20:is(.dark *):hover {
+      background-color: color-mix(in srgb, oklch(.408 .123 38.172) 20%, transparent);
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .dark\:hover\:bg-orange-900\/20:is(.dark *):hover {
+        background-color: color-mix(in oklab, var(--color-orange-900) 20%, transparent);
+      }
     }
   }
 

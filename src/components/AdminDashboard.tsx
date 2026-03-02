@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Package, Clock, CheckCircle, XCircle, Settings, Bell, ArrowLeft, Users } from 'lucide-react';
+import { Package, Clock, CheckCircle, XCircle, Settings, Bell, ArrowLeft, Users, BellOff } from 'lucide-react';
 import { Button } from './ui/button';
 import { getAdminOrders, updateOrderStatus, getAdminUsers } from '../utils/api';
 import { toast } from 'sonner@2.0.3';
@@ -42,17 +42,57 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
   const [accessToken, setAccessToken] = useState('');
   const [newOrdersCount, setNewOrdersCount] = useState(0);
   const [prevOrderCount, setPrevOrderCount] = useState(0);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
 
   useEffect(() => {
     loadAccessToken();
     loadOrders();
     loadUsers();
+    requestNotificationPermission();
     // Refresh orders every 30 seconds and check for new orders
     const interval = setInterval(() => {
       loadOrders(true);
     }, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window) {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      
+      if (permission === 'granted') {
+        toast.success('Browser notifications enabled for new orders!');
+      } else if (permission === 'denied') {
+        toast.info('Browser notifications blocked. You can still see in-app alerts.');
+      }
+    }
+  };
+
+  const showBrowserNotification = (newCount: number) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        const notification = new Notification('🍽️ Sacy\'s Kitchen - New Orders!', {
+          body: `You have ${newCount} new order${newCount > 1 ? 's' : ''} waiting!`,
+          icon: '/favicon.ico',
+          badge: '/favicon.ico',
+          tag: 'new-orders',
+          requireInteraction: false,
+          silent: false,
+        });
+
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+
+        // Auto close after 5 seconds
+        setTimeout(() => notification.close(), 5000);
+      } catch (error) {
+        console.error('Failed to show browser notification:', error);
+      }
+    }
+  };
 
   const loadAccessToken = async () => {
     const user = await getCurrentUser();
@@ -70,15 +110,37 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
       if (checkForNew && prevOrderCount > 0 && orders.length > prevOrderCount) {
         const newCount = orders.length - prevOrderCount;
         setNewOrdersCount(newCount);
+        
+        // Show in-app toast notification
         toast.success(`🔔 ${newCount} new order${newCount > 1 ? 's' : ''} received!`, {
           duration: 5000,
         });
-        // Play notification sound (optional)
+        
+        // Show browser notification
+        showBrowserNotification(newCount);
+        
+        // Play notification sound
         if (typeof Audio !== 'undefined') {
           try {
-            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+Dyvmwh');
-            audio.play().catch(() => {});
-          } catch (e) {}
+            // Using a simple beep sound
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = 800;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.5);
+          } catch (e) {
+            console.error('Failed to play notification sound:', e);
+          }
         }
       }
       setPrevOrderCount(orders.length);
@@ -145,6 +207,28 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
             Back
           </Button>
           <h2 className="text-gray-900 dark:text-white">Admin Dashboard</h2>
+          {/* Notification Status Indicator */}
+          {notificationPermission === 'granted' ? (
+            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-3 py-1 rounded-full">
+              <Bell className="w-4 h-4" />
+              <span className="hidden sm:inline">Notifications On</span>
+            </div>
+          ) : notificationPermission === 'denied' ? (
+            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-full">
+              <BellOff className="w-4 h-4" />
+              <span className="hidden sm:inline">Notifications Off</span>
+            </div>
+          ) : (
+            <Button 
+              onClick={requestNotificationPermission}
+              variant="outline"
+              size="sm"
+              className="text-orange-600 border-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+            >
+              <Bell className="w-4 h-4 mr-2" />
+              Enable Notifications
+            </Button>
+          )}
         </div>
 
         {/* Tab Navigation */}
@@ -157,7 +241,7 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
             <Package className="w-4 h-4 mr-2" />
             <span className="hidden sm:inline">Orders</span>
             {newOrdersCount > 0 && (
-              <span className="ml-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">
+              <span className="ml-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs animate-pulse">
                 {newOrdersCount}
               </span>
             )}
