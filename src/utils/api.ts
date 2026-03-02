@@ -169,7 +169,10 @@ export const updateOrderStatus = async (orderId: string, status: string) => {
       throw new Error('Not authenticated');
     }
 
-    const response = await fetch(`${API_BASE_URL}/admin/orders/${orderId}`, {
+    // Encode orderId since it may contain colons (e.g. "order:timestamp:userId")
+    const encodedOrderId = encodeURIComponent(orderId);
+
+    const response = await fetch(`${API_BASE_URL}/admin/orders/${encodedOrderId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -186,6 +189,31 @@ export const updateOrderStatus = async (orderId: string, status: string) => {
     return await response.json();
   } catch (error) {
     console.error('Update order error:', error);
+    throw error;
+  }
+};
+
+export const getAdminUsers = async () => {
+  try {
+    const token = await getAccessToken();
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await fetch(`${API_BASE_URL}/admin/users`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to get users');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Get admin users error:', error);
     throw error;
   }
 };

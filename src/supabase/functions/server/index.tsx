@@ -23,6 +23,58 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
+const ADMIN_EMAIL = "admin@sacyskitchen.com";
+
+// Initialize admin account on server startup
+(async () => {
+  try {
+    const adminPassword = "lilzic";
+    
+    const { data: existingUsers } = await supabase.auth.admin.listUsers();
+    const adminUser = existingUsers?.users.find(u => u.email === ADMIN_EMAIL);
+    
+    if (!adminUser) {
+      console.log("Creating admin account...");
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: ADMIN_EMAIL,
+        password: adminPassword,
+        email_confirm: true,
+        user_metadata: { name: "Admin" },
+      });
+      
+      if (error) {
+        console.log(`Error creating admin: ${error.message}`);
+      } else {
+        console.log("Admin account created successfully");
+        // Mark as admin
+        await kv.set(`admin:${data.user.id}`, JSON.stringify({ role: "admin" }));
+        await kv.set(`user:${data.user.id}:profile`, JSON.stringify({
+          name: "Admin",
+          email: ADMIN_EMAIL,
+          createdAt: new Date().toISOString(),
+        }));
+        await kv.set(`user:${data.user.id}:favorites`, JSON.stringify([]));
+      }
+    } else {
+      // Always ensure admin is marked in KV store (re-mark in case of KV reset)
+      console.log(`Ensuring admin mark for existing admin user: ${adminUser.id}`);
+      await kv.set(`admin:${adminUser.id}`, JSON.stringify({ role: "admin" }));
+
+      // Ensure profile exists
+      const profileData = await kv.get(`user:${adminUser.id}:profile`);
+      if (!profileData) {
+        await kv.set(`user:${adminUser.id}:profile`, JSON.stringify({
+          name: "Admin",
+          email: ADMIN_EMAIL,
+          createdAt: adminUser.created_at,
+        }));
+      }
+    }
+  } catch (error) {
+    console.log(`Admin initialization error: ${error}`);
+  }
+})();
+
 // Fix/verify existing account endpoint
 app.post("/make-server-7817ccb1/fix-account", async (c) => {
   try {
@@ -378,7 +430,10 @@ app.put("/make-server-7817ccb1/admin/orders/:orderId", async (c) => {
     const orderId = c.req.param("orderId");
     const { status } = await c.req.json();
 
-    const orderData = await kv.get(orderId);
+    // Decode orderId in case it was URL-encoded
+    const decodedOrderId = decodeURIComponent(orderId);
+
+    const orderData = await kv.get(decodedOrderId);
     if (!orderData) {
       return c.json({ error: "Order not found" }, 404);
     }
@@ -387,7 +442,7 @@ app.put("/make-server-7817ccb1/admin/orders/:orderId", async (c) => {
     order.status = status;
     order.updatedAt = new Date().toISOString();
 
-    await kv.set(orderId, JSON.stringify(order));
+    await kv.set(decodedOrderId, JSON.stringify(order));
 
     return c.json({ message: "Order updated successfully", order });
   } catch (error) {
@@ -407,16 +462,24 @@ app.get("/make-server-7817ccb1/profile", async (c) => {
     }
 
     const profileData = await kv.get(`user:${user.id}:profile`);
-    const profile = profileData ? JSON.parse(profileData) : null;
+    const profile = profileData ? JSON.parse(profileData) : {};
 
-    // Check if user is admin
+    // Check if user is admin: first via KV store, then fallback to email check
     const isAdminData = await kv.get(`admin:${user.id}`);
-    const isAdmin = !!isAdminData;
+    let isAdmin = !!isAdminData;
+
+    // Fallback: if admin email matches, mark as admin and ensure KV is set
+    if (!isAdmin && user.email === ADMIN_EMAIL) {
+      console.log(`Admin email match for user ${user.id} — restoring admin KV entry`);
+      await kv.set(`admin:${user.id}`, JSON.stringify({ role: "admin" }));
+      isAdmin = true;
+    }
 
     return c.json({ 
       profile: { 
         ...profile, 
         id: user.id,
+        email: user.email,
         accessToken: accessToken,
         isAdmin: isAdmin
       } 
@@ -573,6 +636,74 @@ app.post("/make-server-7817ccb1/payment-details", async (c) => {
   } catch (error) {
     console.log(`Update payment details error: ${error}`);
     return c.json({ error: "Failed to update payment details" }, 500);
+  }
+});
+
+// Admin: Get all users and their activities
+app.get("/make-server-7817ccb1/admin/users", async (c) => {
+  try {
+    const accessToken = c.req.header("Authorization")?.split(" ")[1];
+    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+
+    if (!user || error) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    // Check if user is admin
+    const isAdminData = await kv.get(`admin:${user.id}`);
+    if (!isAdminData) {
+      return c.json({ error: "Forbidden - Admin access required" }, 403);
+    }
+
+    // Get all users from Supabase
+    const { data: allUsers } = await supabase.auth.admin.listUsers();
+    
+    const users = [];
+    for (const authUser of allUsers?.users || []) {
+      // Skip admin user
+      const isUserAdmin = await kv.get(`admin:${authUser.id}`);
+      if (isUserAdmin) continue;
+
+      const profileData = await kv.get(`user:${authUser.id}:profile`);
+      const profile = profileData ? JSON.parse(profileData) : {};
+      
+      const userOrdersData = await kv.get(`user:${authUser.id}:orders`);
+      const orderIds = userOrdersData ? JSON.parse(userOrdersData) : [];
+      
+      const favoritesData = await kv.get(`user:${authUser.id}:favorites`);
+      const favorites = favoritesData ? JSON.parse(favoritesData) : [];
+
+      // Get user's order count and total spent
+      let totalSpent = 0;
+      let completedOrders = 0;
+      for (const orderId of orderIds) {
+        const orderData = await kv.get(orderId);
+        if (orderData) {
+          const order = JSON.parse(orderData);
+          if (order.status === 'completed') {
+            completedOrders++;
+            totalSpent += order.total || 0;
+          }
+        }
+      }
+
+      users.push({
+        id: authUser.id,
+        email: authUser.email,
+        name: profile.name || 'Unknown',
+        createdAt: authUser.created_at,
+        lastSignIn: authUser.last_sign_in_at,
+        orderCount: orderIds.length,
+        completedOrders,
+        totalSpent,
+        favoritesCount: favorites.length,
+      });
+    }
+
+    return c.json({ users });
+  } catch (error) {
+    console.log(`Get users error: ${error}`);
+    return c.json({ error: "Failed to get users" }, 500);
   }
 });
 

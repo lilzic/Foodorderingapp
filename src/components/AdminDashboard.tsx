@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Package, Clock, CheckCircle, XCircle, Settings, Bell, ArrowLeft } from 'lucide-react';
+import { Package, Clock, CheckCircle, XCircle, Settings, Bell, ArrowLeft, Users } from 'lucide-react';
 import { Button } from './ui/button';
-import { getAdminOrders, updateOrderStatus } from '../utils/api';
+import { getAdminOrders, updateOrderStatus, getAdminUsers } from '../utils/api';
 import { toast } from 'sonner@2.0.3';
 import { AdminSettings } from './AdminSettings';
 import { getCurrentUser } from '../utils/auth';
@@ -17,15 +17,28 @@ interface AdminOrder {
   paymentMethod: any;
 }
 
+interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+  lastSignIn: string;
+  orderCount: number;
+  completedOrders: number;
+  totalSpent: number;
+  favoritesCount: number;
+}
+
 interface AdminDashboardProps {
   onBack: () => void;
 }
 
 export function AdminDashboard({ onBack }: AdminDashboardProps) {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
-  const [activeTab, setActiveTab] = useState<'orders' | 'settings'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'users' | 'settings'>('orders');
   const [accessToken, setAccessToken] = useState('');
   const [newOrdersCount, setNewOrdersCount] = useState(0);
   const [prevOrderCount, setPrevOrderCount] = useState(0);
@@ -33,6 +46,7 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
   useEffect(() => {
     loadAccessToken();
     loadOrders();
+    loadUsers();
     // Refresh orders every 30 seconds and check for new orders
     const interval = setInterval(() => {
       loadOrders(true);
@@ -72,6 +86,15 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
       toast.error('Failed to load orders');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadUsers = async () => {
+    try {
+      const { users } = await getAdminUsers();
+      setUsers(users);
+    } catch (error) {
+      toast.error('Failed to load users');
     }
   };
 
@@ -138,6 +161,14 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
                 {newOrdersCount}
               </span>
             )}
+          </Button>
+          <Button
+            onClick={() => setActiveTab('users')}
+            variant={activeTab === 'users' ? 'default' : 'outline'}
+            className={`flex-1 sm:flex-initial ${activeTab === 'users' ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+          >
+            <Users className="w-4 h-4 mr-2" />
+            <span className="hidden sm:inline">Users</span>
           </Button>
           <Button
             onClick={() => setActiveTab('settings')}
@@ -281,6 +312,87 @@ export function AdminDashboard({ onBack }: AdminDashboardProps) {
                   </Button>
                 </div>
               )}
+            </div>
+          ))
+        )}
+        </div>
+      )}
+
+      {/* Users List */}
+      {activeTab === 'users' && (
+        <div className="space-y-4">
+          {users.length === 0 ? (
+            <div className="text-center py-12">
+              <Users className="w-16 h-16 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-600 dark:text-gray-400">No users found</p>
+            </div>
+          ) : (
+            users.map((user) => (
+            <div
+              key={user.id}
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6"
+            >
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Users className="w-5 h-5 text-blue-500" />
+                    <h3>User: {user.name}</h3>
+                  </div>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Email: {user.email}
+                  </p>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Created: {new Date(user.createdAt).toLocaleDateString('en-NG', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Last Sign In: {new Date(user.lastSignIn).toLocaleDateString('en-NG', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-orange-600 mb-2">
+                    ₦{user.totalSpent.toLocaleString()}
+                  </p>
+                  <span
+                    className={`px-3 py-1 rounded-full text-sm ${
+                      user.orderCount > 0
+                        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                        : 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                    }`}
+                  >
+                    {user.orderCount} Order{user.orderCount > 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+
+              <div className="border-t dark:border-gray-700 pt-4 mb-4">
+                <h4 className="mb-2">Details:</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">
+                      Completed Orders
+                    </span>
+                    <span>{user.completedOrders}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">
+                      Favorites Count
+                    </span>
+                    <span>{user.favoritesCount}</span>
+                  </div>
+                </div>
+              </div>
             </div>
           ))
         )}

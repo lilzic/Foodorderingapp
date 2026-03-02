@@ -45,8 +45,14 @@ export const signUp = async (email: string, password: string, name: string) => {
 
 export const signIn = async (email: string, password: string) => {
   try {
+    // Handle admin login specially
+    let actualEmail = email;
+    if (email.toLowerCase() === 'admin') {
+      actualEmail = 'admin@sacyskitchen.com';
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: actualEmail,
       password,
     });
 
